@@ -361,6 +361,11 @@ erDiagram
 - **Indexes**:
   - `idx_doc_requirements_org_active`: `(organization_id, is_active)`
   - `idx_doc_requirements_lookup`: `(organization_id, supplier_category, supplier_tier)`
+- **Operational & Evaluation Notes**:
+  - **Tenant Boundary Guarantee**: Composite foreign key `fk_doc_requirements_doc_type` structurally ensures requirements only bind to document types within the same tenant. The service layer validates this prior to SQL execution (`400 Bad Request`).
+  - **Duplicate Prevention**: The business layer enforces uniqueness on `(organization_id, document_type_id, supplier_category, supplier_tier)` (`409 Conflict`) to avoid ambiguous requirement policies.
+  - **Supplier Evaluation**: The evaluation engine matches a supplier's `(category, tier)` against active requirements (`is_active = TRUE`), excluding disabled requirements and partitioning results into `mandatory_requirements` and `optional_requirements`.
+  - **Audit Integration**: Mutations atomically generate records in `audit_events` (`document_requirement.created`, `document_requirement.updated`, `document_requirement.enabled`, `document_requirement.disabled`).
 
 ---
 

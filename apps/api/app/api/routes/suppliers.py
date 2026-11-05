@@ -7,12 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import OrganizationContext
 from app.auth.dependencies import get_organization_context
 from app.db.session import get_db
+from app.schemas.document_requirement import (
+    SupplierRequirementsEvaluationResponse,
+)
 from app.schemas.supplier import (
     SupplierCreate,
     SupplierListResponse,
     SupplierResponse,
     SupplierUpdate,
 )
+from app.services.document_requirement import DocumentRequirementService
 from app.services.supplier import SupplierService
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
@@ -158,3 +162,22 @@ async def archive_supplier(
         user_agent=user_agent,
     )
     return SupplierResponse.model_validate(supplier)
+
+
+@router.get(
+    "/{supplier_id}/document-requirements",
+    response_model=SupplierRequirementsEvaluationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Evaluate applicable document requirements for a supplier",
+)
+async def evaluate_supplier_document_requirements(
+    supplier_id: UUID,
+    ctx: Annotated[OrganizationContext, Depends(get_organization_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SupplierRequirementsEvaluationResponse:
+    """Evaluate mandatory and optional document requirements applicable to a supplier."""
+    service = DocumentRequirementService(db)
+    return await service.evaluate_supplier_requirements(
+        context=ctx,
+        supplier_id=supplier_id,
+    )

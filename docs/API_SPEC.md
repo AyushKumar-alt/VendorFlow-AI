@@ -244,3 +244,211 @@ Soft-archive a supplier.
 - **Error Responses**:
   - `400 Bad Request`: If supplier is already archived.
   - `404 Not Found`: If supplier does not exist in caller's organization.
+
+---
+
+## 4. Document Types API
+
+All endpoints require authentication via `OrganizationContext`. Operations are strictly tenant-scoped to the caller's organization.
+
+### `POST /api/v1/document-types`
+Create a new tenant-owned document type.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Request Body (`application/json`)**:
+  - `code` (string, required): Alphanumeric code (2-50 chars, regex `^[a-z0-9_-]+$`). Unique within organization.
+  - `name` (string, required): Display title (1-255 chars).
+  - `description` (string, optional): Detailed explanation or issuing authority.
+  - `category` (string, default `"statutory"`): One of `statutory`, `tax`, `quality`, `financial`, `legal`, `safety`.
+  - `has_expiry` (boolean, default `false`): Whether documents of this type require expiry tracking.
+  - `expected_fields` (array, default `[]`): Expected fields for extraction/validation (e.g. `["gstin", "legal_name"]`).
+- **Response (`201 Created`)**: Returns created `DocumentTypeResponse`.
+- **Error Responses**:
+  - `409 Conflict`: If `code` already exists within caller's organization.
+  - `422 Unprocessable Entity`: Validation failure on category, code format, or payload fields.
+
+---
+
+### `GET /api/v1/document-types`
+List document types belonging to the caller's organization.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Query Parameters**:
+  - `category` (optional): Filter by category.
+  - `search` (optional): Case-insensitive search on `name`, `code`, or `description`.
+  - `page` (optional, default `1`): 1-based page index.
+  - `page_size` (optional, default `50`, max `100`): Items per page.
+- **Response (`200 OK`)**: Returns `DocumentTypeListResponse` with pagination metadata (`total`, `page`, `page_size`, `total_pages`, `items`).
+
+---
+
+### `GET /api/v1/document-types/{document_type_id}`
+Retrieve a single document type by ID.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `document_type_id`: UUID of document type.
+- **Response (`200 OK`)**: Returns `DocumentTypeResponse`.
+- **Error Responses**:
+  - `404 Not Found`: If document type does not exist or belongs to another organization.
+
+---
+
+### `PATCH /api/v1/document-types/{document_type_id}`
+Partially update editable fields of a document type.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `document_type_id`: UUID of document type.
+- **Request Body (`application/json`)**:
+  - `name`, `description`, `category`, `has_expiry`, `expected_fields`.
+  - `code`, `id`, `organization_id`, and `is_system_preset` cannot be updated (`extra="forbid"` / immutable).
+- **Response (`200 OK`)**: Returns updated `DocumentTypeResponse`.
+- **Error Responses**:
+  - `404 Not Found`: If document type does not exist or belongs to another organization.
+
+---
+
+## 5. Document Requirements API
+
+All endpoints require authentication via `OrganizationContext`.
+
+### `POST /api/v1/document-requirements`
+Create an organization-specific document requirement policy.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Request Body (`application/json`)**:
+  - `document_type_id` (UUID, required): ID of tenant-owned document type.
+  - `name` (string, required): Requirement policy name (e.g. "Tier 1 Statutory GST Pack").
+  - `supplier_category` (string, optional): Target category (e.g. `machined_components`) or `null` for all categories.
+  - `supplier_tier` (string, optional): Target tier (e.g. `tier_1`) or `null` for all tiers.
+  - `is_mandatory` (boolean, default `true`): Mandatory vs optional.
+  - `validity_period_days` (integer, optional, `> 0`): Default validity duration.
+  - `expiry_lead_notice_days` (integer, default `30`, `>= 0`): Advance warning threshold before expiry.
+  - `is_active` (boolean, default `true`): Active policy status.
+  - `validation_rules` (object, default `{}`): JSONB validation criteria.
+- **Business Validations**:
+  - `document_type_id` must belong to caller's organization (`400 Bad Request` if missing or cross-tenant).
+  - Duplicate mappings `(document_type_id, supplier_category, supplier_tier)` within organization are rejected (`409 Conflict`).
+- **Response (`201 Created`)**: Returns `DocumentRequirementResponse`.
+- **Error Responses**:
+  - `400 Bad Request`: Cross-tenant or invalid document type.
+  - `409 Conflict`: Duplicate requirement configuration for this type/category/tier combination.
+
+---
+
+### `GET /api/v1/document-requirements`
+List document requirements for the caller's organization.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Query Parameters**:
+  - `document_type_id` (optional): Filter by document type UUID.
+  - `supplier_category` (optional): Filter by supplier category.
+  - `supplier_tier` (optional): Filter by supplier tier.
+  - `is_active` (optional): Filter by active (`true`) or disabled (`false`).
+  - `is_mandatory` (optional): Filter by mandatory (`true`) or optional (`false`).
+  - `page` (optional, default `1`): 1-based page number.
+  - `page_size` (optional, default `50`, max `100`): Items per page.
+- **Response (`200 OK`)**: Returns `DocumentRequirementListResponse`.
+
+---
+
+### `GET /api/v1/document-requirements/{requirement_id}`
+Retrieve a single document requirement by ID.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `requirement_id`: UUID of requirement.
+- **Response (`200 OK`)**: Returns `DocumentRequirementResponse` with populated `document_type` metadata.
+- **Error Responses**:
+  - `404 Not Found`: If requirement does not exist or belongs to another organization.
+
+---
+
+### `PATCH /api/v1/document-requirements/{requirement_id}`
+Partially update an existing document requirement.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `requirement_id`: UUID of requirement.
+- **Request Body (`application/json`)**:
+  - `name`, `supplier_category`, `supplier_tier`, `is_mandatory`, `validity_period_days`, `expiry_lead_notice_days`, `is_active`, `validation_rules`.
+- **Response (`200 OK`)**: Returns updated `DocumentRequirementResponse`.
+- **Error Responses**:
+  - `404 Not Found`: If requirement does not exist in caller's organization.
+  - `409 Conflict`: If changing category/tier results in a duplicate mapping.
+
+---
+
+### `POST /api/v1/document-requirements/{requirement_id}/enable`
+Enable a document requirement.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `requirement_id`: UUID of requirement.
+- **Semantics**: Sets `is_active = true` and records `document_requirement.enabled` audit event.
+- **Response (`200 OK`)**: Returns `DocumentRequirementResponse`.
+
+---
+
+### `POST /api/v1/document-requirements/{requirement_id}/disable`
+Disable a document requirement.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `requirement_id`: UUID of requirement.
+- **Semantics**: Sets `is_active = false` and records `document_requirement.disabled` audit event. Disabled requirements are excluded from active supplier evaluation.
+- **Response (`200 OK`)**: Returns `DocumentRequirementResponse`.
+
+---
+
+## 6. Supplier Requirements Evaluation API
+
+### `GET /api/v1/suppliers/{supplier_id}/document-requirements`
+Evaluate the applicable document requirements for a specific supplier.
+
+- **Authentication**: Required (`OrganizationContext`).
+- **Path Parameters**:
+  - `supplier_id`: UUID of supplier.
+- **Evaluation Rules**:
+  1. Supplier must belong to caller's organization (`404 Not Found` for cross-tenant access).
+  2. Only active requirements (`is_active = true`) are evaluated (disabled requirements are excluded).
+  3. A requirement applies to the supplier if:
+     - `supplier_category IS NULL OR supplier_category == supplier.category`
+     - `supplier_tier IS NULL OR supplier_tier == supplier.tier`
+  4. Applicable requirements are partitioned into:
+     - `mandatory_requirements`: Applicable requirements where `is_mandatory = true`.
+     - `optional_requirements`: Applicable requirements where `is_mandatory = false`.
+- **Response (`200 OK`)**: Returns `SupplierRequirementsEvaluationResponse`:
+  ```json
+  {
+    "supplier_id": "c1a938d8-...",
+    "supplier_name": "Bharat Precision Machining Ltd",
+    "supplier_category": "machined_components",
+    "supplier_tier": "tier_1",
+    "total_applicable": 3,
+    "total_mandatory": 2,
+    "total_optional": 1,
+    "mandatory_requirements": [
+      {
+        "requirement_id": "...",
+        "document_type_id": "...",
+        "name": "Mandatory Statutory GST",
+        "is_mandatory": true,
+        "validity_period_days": null,
+        "expiry_lead_notice_days": 30,
+        "supplier_category": null,
+        "supplier_tier": null,
+        "validation_rules": {},
+        "document_type_code": "gst_certificate",
+        "document_type_name": "GST Certificate",
+        "document_type_category": "statutory",
+        "has_expiry": false,
+        "expected_fields": ["gstin", "legal_name"]
+      }
+    ],
+    "optional_requirements": [...]
+  }
+  ```
+- **Error Responses**:
+  - `404 Not Found`: Supplier does not exist or belongs to another tenant.

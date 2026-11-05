@@ -426,7 +426,65 @@ In compliance with Indian statutory requirements (Companies Act 2013 and CGST Ac
 - Archived suppliers are immutable: any subsequent update attempt is rejected with HTTP 400 Bad Request.
 - Archival is idempotent-safe: attempting to archive an already-archived supplier is rejected with HTTP 400 Bad Request.
 
-### 5.3 Configurable Indian Regulatory Compliance Engine
+### 5.3 Document Catalog & Organization-Specific Requirements Architecture
+
+The Document Requirements domain (`apps/api/app/api/routes/document_types.py`, `document_requirements.py`, `app/services/`, `app/repositories/`) enables each buyer organization to establish and customize its document compliance policy matrix.
+
+```
+                          Client HTTP Request
+                                   │
+                                   ▼
+            ┌──────────────────────────────────────────────┐
+            │  FastAPI Routers:                            │
+            │  - /api/v1/document-types                    │
+            │  - /api/v1/document-requirements             │
+            │  - /api/v1/suppliers/{id}/document-requirements│
+            │  Enforces OrganizationContext injection      │
+            └──────────────────────┬───────────────────────┘
+                                   │
+                                   ▼
+            ┌──────────────────────────────────────────────┐
+            │  Domain Services:                            │
+            │  - DocumentTypeService                       │
+            │  - DocumentRequirementService                │
+            │  Validates tenant boundaries, duplicates     │
+            │  Orchestrates in-transaction AuditEvents     │
+            └──────────────────────┬───────────────────────┘
+                                   │
+                                   ▼
+            ┌──────────────────────────────────────────────┐
+            │  Repositories:                               │
+            │  - DocumentTypeRepository                    │
+            │  - DocumentRequirementRepository             │
+            │  Strictly scopes all queries by org_id       │
+            └──────────────────────┬───────────────────────┘
+                                   │
+                                   ▼
+            ┌──────────────────────────────────────────────┐
+            │  PostgreSQL 17 Database                      │
+            │  - document_types (composite unique code)    │
+            │  - document_requirements (composite FK)      │
+            │  - audit_events                              │
+            └──────────────────────────────────────────────┘
+```
+
+#### Key Architecture Principles:
+1. **Tenant-Scoped Document Catalog**:
+   - `document_types` are strictly owned by each organization.
+   - Unique code constraint `(organization_id, code)` prevents duplicate codes within a tenant while allowing independent organizations to use standard codes (`gst_certificate`, `pan_card`, `iso_9001`).
+2. **Referential Tenant Boundary Guarantee**:
+   - `document_requirements` enforces foreign key `(document_type_id, organization_id) REFERENCES document_types(id, organization_id) ON DELETE RESTRICT`.
+   - The service layer actively verifies that `document_type_id` belongs to `OrganizationContext.organization_id` prior to database execution, returning `400 Bad Request` instead of leaking database foreign key violation details.
+3. **Requirement Mapping Uniqueness**:
+   - An organization cannot define ambiguous duplicate requirements for the exact same `(document_type_id, supplier_category, supplier_tier)`. Duplicate requests return `409 Conflict`.
+4. **Supplier Requirement Evaluation Engine**:
+   - Evaluates requirements applicable to a specific supplier based on the supplier's `category` and `tier`.
+   - Filters out disabled requirements (`is_active == FALSE`).
+   - Resolves requirements where `supplier_category IS NULL OR supplier_category == supplier.category` and `supplier_tier IS NULL OR supplier_tier == supplier.tier`.
+   - Cleanly partitions results into `mandatory_requirements` and `optional_requirements`.
+   - Cross-tenant supplier evaluation attempts are strictly rejected with `404 Not Found`.
+
+### 5.4 Configurable Indian Regulatory Compliance Engine
 VendorFlow AI does **not** hardcode Indian compliance rules into table definitions or database enums:
 - System preset `document_types` are seeded per organization (`is_system_preset = TRUE`).
 - Organizations can create custom document types (`is_system_preset = FALSE`).
