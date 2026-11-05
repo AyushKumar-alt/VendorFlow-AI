@@ -30,7 +30,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def check_database() -> bool:
-    async with engine.connect() as conn:
+async def check_database(target_engine: AsyncEngine | None = None) -> bool:
+    eng = target_engine or engine
+    async with eng.connect() as conn:
         await conn.execute(text("SELECT 1"))
     return True
