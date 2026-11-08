@@ -22,6 +22,8 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.organization import Organization
     from app.models.supplier_document import SupplierDocument
+    from app.models.supplier_document_group import SupplierDocumentGroup
+    from app.models.supplier_site import SupplierSite
 
 
 class Supplier(Base):
@@ -146,5 +148,17 @@ class Supplier(Base):
         "SupplierDocument",
         back_populates="supplier",
         primaryjoin="and_(Supplier.id==SupplierDocument.supplier_id, Supplier.organization_id==SupplierDocument.organization_id)",
+        overlaps="organization",
+    )
+    sites: Mapped[list["SupplierSite"]] = relationship(
+        "SupplierSite",
+        back_populates="supplier",
+        primaryjoin="and_(Supplier.id==SupplierSite.supplier_id, Supplier.organization_id==SupplierSite.organization_id)",
+        overlaps="organization",
+    )
+    document_groups: Mapped[list["SupplierDocumentGroup"]] = relationship(
+        "SupplierDocumentGroup",
+        back_populates="supplier",
+        primaryjoin="and_(Supplier.id==SupplierDocumentGroup.supplier_id, Supplier.organization_id==SupplierDocumentGroup.organization_id)",
         overlaps="organization",
     )

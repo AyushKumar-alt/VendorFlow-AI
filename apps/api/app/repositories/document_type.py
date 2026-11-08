@@ -84,4 +84,3 @@ class DocumentTypeRepository:
         self.db.add(document_type)
         await self.db.flush()
         return document_type
-

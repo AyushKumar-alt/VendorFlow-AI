@@ -33,9 +33,14 @@ def get_target_url() -> URL:
     x_args = context.get_x_argument(as_dictionary=True)
     if x_args.get("db") == "test" or os.environ.get("ALEMBIC_DB") == "test":
         test_url = settings.get_test_database_url()
-        if test_url.database != "vendorflow_test":
+        approved_db = os.environ.get("VENDORFLOW_APPROVED_TEST_DB", "vendorflow_test")
+        if test_url.database != approved_db:
             raise RuntimeError(
-                f"Test database safety guard violation: Expected 'vendorflow_test', got '{test_url.database}'."
+                f"Test database safety guard violation: Expected '{approved_db}', got '{test_url.database}'."
+            )
+        if test_url.database == "vendorflow":
+            raise RuntimeError(
+                "CRITICAL SAFETY VIOLATION: Migration attempted access to production database 'vendorflow'!"
             )
         return test_url
 

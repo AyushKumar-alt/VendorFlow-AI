@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from app.models.document_type import DocumentType
     from app.models.organization import Organization
     from app.models.supplier import Supplier
+    from app.models.supplier_document_group import SupplierDocumentGroup
 
 
 class SupplierDocument(Base):
@@ -58,9 +59,32 @@ class SupplierDocument(Base):
         UUID(as_uuid=True),
         nullable=False,
     )
-    requirement_id: Mapped[uuid.UUID | None] = mapped_column(
+    # Phase 3.4 lineage and lifecycle columns
+    document_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    processing_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+    legacy_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    approval_provenance: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    legacy_requirement_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         nullable=True,
+    )
+    is_effective_version: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
     )
     previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -72,12 +96,6 @@ class SupplierDocument(Base):
         default=1,
         server_default=text("1"),
     )
-    status: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        default="uploaded",
-        server_default=text("'uploaded'"),
-    )
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -85,12 +103,6 @@ class SupplierDocument(Base):
     file_hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     issued_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    is_active_version: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text("true"),
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -116,12 +128,6 @@ class SupplierDocument(Base):
             "organization_id",
             name="uq_supplier_documents_id_lineage",
         ),
-        UniqueConstraint(
-            "supplier_id",
-            "document_type_id",
-            "version",
-            name="uq_supplier_documents_version",
-        ),
         ForeignKeyConstraint(
             ["supplier_id", "organization_id"],
             ["suppliers.id", "suppliers.organization_id"],
@@ -132,16 +138,6 @@ class SupplierDocument(Base):
             ["document_type_id", "organization_id"],
             ["document_types.id", "document_types.organization_id"],
             name="fk_supplier_documents_doc_type",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["requirement_id", "document_type_id", "organization_id"],
-            [
-                "document_requirements.id",
-                "document_requirements.document_type_id",
-                "document_requirements.organization_id",
-            ],
-            name="fk_supplier_documents_requirement",
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -177,29 +173,70 @@ class SupplierDocument(Base):
             name="chk_supplier_docs_mime_type",
         ),
         CheckConstraint(
-            "status IN ('uploaded', 'processing', 'extracted', 'verified', 'rejected', 'action_required', 'expired', 'superseded')",
-            name="chk_supplier_docs_status",
+            "processing_status IN ('uploaded', 'processing', 'extracted', 'failed')",
+            name="ck_supplier_docs_processing_status",
+        ),
+        CheckConstraint(
+            "legacy_status IS NULL OR legacy_status IN ('uploaded', 'processing', 'extracted', 'verified', 'rejected', 'action_required', 'expired', 'superseded')",
+            name="ck_supplier_docs_legacy_status",
+        ),
+        CheckConstraint(
+            "approval_provenance IS NULL OR approval_provenance IN ('review', 'legacy_verified')",
+            name="ck_supplier_docs_approval_provenance",
+        ),
+        ForeignKeyConstraint(
+            [
+                "document_group_id",
+                "supplier_id",
+                "document_type_id",
+                "organization_id",
+            ],
+            [
+                "supplier_document_groups.id",
+                "supplier_document_groups.supplier_id",
+                "supplier_document_groups.document_type_id",
+                "supplier_document_groups.organization_id",
+            ],
+            name="fk_supplier_documents_group",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["legacy_requirement_id", "organization_id"],
+            [
+                "document_requirements.id",
+                "document_requirements.organization_id",
+            ],
+            name="fk_supplier_documents_legacy_req",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "document_group_id",
+            "version",
+            name="uq_supplier_documents_group_version",
         ),
         Index(
-            "uq_supplier_docs_active_version",
-            "supplier_id",
-            "document_type_id",
+            "uq_supplier_docs_effective_group",
+            "document_group_id",
             unique=True,
-            postgresql_where=text("is_active_version = TRUE"),
+            postgresql_where=text("is_effective_version = TRUE"),
         ),
         Index(
-            "idx_supplier_docs_expiry",
+            "idx_supplier_docs_group",
+            "organization_id",
+            "document_group_id",
+        ),
+        Index(
+            "idx_supplier_docs_effective_expiry",
             "organization_id",
             "expiry_date",
             postgresql_where=text(
-                "is_active_version = TRUE AND expiry_date IS NOT NULL"
+                "is_effective_version = TRUE AND expiry_date IS NOT NULL"
             ),
         ),
         Index(
-            "idx_supplier_docs_supplier",
+            "idx_supplier_docs_processing",
             "organization_id",
-            "supplier_id",
-            "is_active_version",
+            "processing_status",
         ),
         Index(
             "idx_supplier_docs_org_hash",
@@ -220,11 +257,6 @@ class SupplierDocument(Base):
         "DocumentType",
         foreign_keys=[document_type_id, organization_id],
         overlaps="documents,organization,supplier",
-    )
-    requirement: Mapped["DocumentRequirement | None"] = relationship(
-        "DocumentRequirement",
-        foreign_keys=[requirement_id, document_type_id, organization_id],
-        overlaps="document_type,documents,organization,supplier",
     )
     extractions: Mapped[list["DocumentExtraction"]] = relationship(
         "DocumentExtraction",
@@ -248,4 +280,20 @@ class SupplierDocument(Base):
             organization_id,
         ],
         viewonly=True,
+    )
+    document_group: Mapped["SupplierDocumentGroup | None"] = relationship(
+        "SupplierDocumentGroup",
+        back_populates="documents",
+        foreign_keys=[
+            document_group_id,
+            supplier_id,
+            document_type_id,
+            organization_id,
+        ],
+        overlaps="document_type,documents,organization,supplier",
+    )
+    legacy_requirement: Mapped["DocumentRequirement | None"] = relationship(
+        "DocumentRequirement",
+        foreign_keys=[legacy_requirement_id, organization_id],
+        overlaps="document_group,document_type,documents,organization,supplier",
     )

@@ -22,6 +22,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.document_group_requirement_link import (
+        DocumentGroupRequirementLink,
+    )
     from app.models.document_type import DocumentType
     from app.models.organization import Organization
 
@@ -133,4 +136,10 @@ class DocumentRequirement(Base):
         back_populates="requirements",
         foreign_keys=[document_type_id, organization_id],
         overlaps="organization,document_requirements",
+    )
+    group_links: Mapped[list["DocumentGroupRequirementLink"]] = relationship(
+        "DocumentGroupRequirementLink",
+        back_populates="requirement",
+        foreign_keys="[DocumentGroupRequirementLink.requirement_id, DocumentGroupRequirementLink.organization_id]",
+        overlaps="document_group,organization",
     )

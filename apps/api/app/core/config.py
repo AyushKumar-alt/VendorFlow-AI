@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -79,10 +80,15 @@ class Settings(BaseSettings):
                 "Refusing to execute tests or test migrations against an unverified database."
             )
         url = make_url(raw_url)
-        if url.database != "vendorflow_test":
+        approved_db = os.environ.get("VENDORFLOW_APPROVED_TEST_DB", "vendorflow_test")
+        if url.database != approved_db:
             raise RuntimeError(
-                f"Test database safety guard violation: Expected target database 'vendorflow_test', "
+                f"Test database safety guard violation: Expected target database '{approved_db}', "
                 f"but resolved to '{url.database}'. Refusing execution to prevent modifying non-test databases."
+            )
+        if url.database == "vendorflow":
+            raise RuntimeError(
+                "CRITICAL SAFETY VIOLATION: Test database resolved to production database 'vendorflow'!"
             )
         return url
 
